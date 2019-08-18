@@ -6,7 +6,7 @@
 
 import { addPlaceholderTick, cancelPlaceholderTick } from '../ticker';
 
-import { eventBeforeSend, eventDragReleaseEnd, eventLayoutStart } from '../shared';
+import { eventBeforeSend, eventDragReleaseEnd, eventLayoutStart, eventHideStart } from '../shared';
 
 import ItemAnimate from '../Item/ItemAnimate';
 
@@ -45,6 +45,7 @@ function ItemDragPlaceholder(item) {
   this._onLayoutEnd = this._onLayoutEnd.bind(this);
   this._onReleaseEnd = this._onReleaseEnd.bind(this);
   this._onMigrate = this._onMigrate.bind(this);
+  this._onHide = this._onHide.bind(this);
 }
 
 /**
@@ -59,6 +60,7 @@ function ItemDragPlaceholder(item) {
  * @memberof ItemDragPlaceholder.prototype
  */
 ItemDragPlaceholder.prototype._onLayoutStart = function() {
+  console.log('onLayoutStart', this._item.isActive());
   var item = this._item;
   var grid = item.getGrid();
 
@@ -66,6 +68,12 @@ ItemDragPlaceholder.prototype._onLayoutStart = function() {
   var itemIndex = grid._items.indexOf(item);
   var nextLeft = grid._layout.slots[itemIndex * 2];
   var nextTop = grid._layout.slots[itemIndex * 2 + 1];
+
+  console.log({
+    itemIndex,
+    isHiding: item.isHiding(),
+    isVisible: item.isVisible()
+  });
 
   // If item's position did not change and the item did not migrate we can
   // safely skip layout.
@@ -89,11 +97,8 @@ ItemDragPlaceholder.prototype._onLayoutStart = function() {
     // Snap placeholder to correct position.
     var targetStyles = {};
     targetStyles[transformProp] = getTranslateString(nextLeft, nextTop);
-    if (this._animation.isAnimating()) {
-      this._animation.stop(targetStyles);
-    } else {
-      setStyles(this._element, targetStyles);
-    }
+    setStyles(this._element, targetStyles);
+    this._animation.stop(false);
 
     // Move placeholder inside correct container after migration.
     if (this._didMigrate) {
@@ -120,6 +125,8 @@ ItemDragPlaceholder.prototype._onLayoutStart = function() {
 ItemDragPlaceholder.prototype._setupAnimation = function() {
   if (!this.isActive()) return;
 
+  console.log('setupAnimation', this._item.isActive());
+
   var translate = getTranslate(this._element);
   this._currentLeft = translate.x;
   this._currentTop = translate.y;
@@ -134,6 +141,8 @@ ItemDragPlaceholder.prototype._setupAnimation = function() {
 ItemDragPlaceholder.prototype._startAnimation = function() {
   if (!this.isActive()) return;
 
+  console.log('startAnimation', this._item.isActive());
+
   var animation = this._animation;
   var currentLeft = this._currentLeft;
   var currentTop = this._currentTop;
@@ -146,7 +155,10 @@ ItemDragPlaceholder.prototype._startAnimation = function() {
   // If placeholder is already in correct position let's just stop animation
   // and be done with it.
   if (currentLeft === nextLeft && currentTop === nextTop) {
-    if (animation.isAnimating()) animation.stop(targetStyles);
+    if (animation.isAnimating()) {
+      setStyles(this._element, targetStyles);
+      animation.stop(false);
+    }
     return;
   }
 
@@ -154,6 +166,7 @@ ItemDragPlaceholder.prototype._startAnimation = function() {
   var settings = this._item.getGrid()._settings.dragPlaceholder;
   var currentStyles = {};
   currentStyles[transformProp] = getTranslateString(currentLeft, currentTop);
+  console.log(currentStyles, targetStyles);
   animation.start(currentStyles, targetStyles, {
     duration: settings.duration,
     easing: settings.easing,
@@ -219,14 +232,33 @@ ItemDragPlaceholder.prototype._onMigrate = function(data) {
   grid.off(eventDragReleaseEnd, this._onReleaseEnd);
   grid.off(eventLayoutStart, this._onLayoutStart);
   grid.off(eventBeforeSend, this._onMigrate);
+  grid.off(eventHideStart, this._onHide);
 
   // Bind listeners to the next grid.
   nextGrid.on(eventDragReleaseEnd, this._onReleaseEnd);
   nextGrid.on(eventLayoutStart, this._onLayoutStart);
   nextGrid.on(eventBeforeSend, this._onMigrate);
+  nextGrid.on(eventHideStart, this._onHide);
 
   // Mark the item as migrated.
   this._didMigrate = true;
+};
+
+/**
+ * Reset placeholder if the associated item is hidden.
+ *
+ * @private
+ * @memberof ItemDragPlaceholder.prototype
+ * @param {Item[]} items
+ */
+ItemDragPlaceholder.prototype._onHide = function(items) {
+  for (var i = 0; i < items.length; i++) {
+    if (items[i]._id === this._item._id) {
+      console.log('onHide');
+      this.reset();
+      return;
+    }
+  }
 };
 
 /**
@@ -291,6 +323,7 @@ ItemDragPlaceholder.prototype.create = function() {
   grid.on(eventLayoutStart, this._onLayoutStart);
   grid.on(eventDragReleaseEnd, this._onReleaseEnd);
   grid.on(eventBeforeSend, this._onMigrate);
+  grid.on(eventHideStart, this._onHide);
 
   // onCreate hook.
   if (isFunction(settings.dragPlaceholder.onCreate)) {
@@ -330,6 +363,7 @@ ItemDragPlaceholder.prototype.reset = function() {
   grid.off(eventDragReleaseEnd, this._onReleaseEnd);
   grid.off(eventLayoutStart, this._onLayoutStart);
   grid.off(eventBeforeSend, this._onMigrate);
+  grid.off(eventHideStart, this._onHide);
 
   // Remove placeholder class from the placeholder element.
   if (this._className) {

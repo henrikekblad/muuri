@@ -3107,27 +3107,21 @@
    *
    * @public
    * @memberof ItemAnimate.prototype
-   * @param {Object} [styles]
+   * @param {Boolean} [applyCurrentStyles=true]
    */
-  ItemAnimate.prototype.stop = function(styles) {
+  ItemAnimate.prototype.stop = function(applyCurrentStyles) {
     if (this._isDestroyed || !this._animation) return;
 
     var element = this._element;
     var currentProps = this._props;
     var currentValues = this._values;
 
-    // Calculate current styles if no specific styles are provided.
-    if (!styles) {
-      styles = getCurrentStyles(element, currentProps);
+    if (applyCurrentStyles !== false) {
+      setStyles(element, getCurrentStyles(element, currentProps));
     }
 
-    setStyles(element, styles);
-
-    // Cancel animation.
     this._animation.cancel();
     this._animation = this._callback = null;
-
-    // Reset current props and values.
     currentProps.length = currentValues.length = 0;
   };
 
@@ -3213,6 +3207,7 @@
     this._onLayoutEnd = this._onLayoutEnd.bind(this);
     this._onReleaseEnd = this._onReleaseEnd.bind(this);
     this._onMigrate = this._onMigrate.bind(this);
+    this._onHide = this._onHide.bind(this);
   }
 
   /**
@@ -3227,6 +3222,7 @@
    * @memberof ItemDragPlaceholder.prototype
    */
   ItemDragPlaceholder.prototype._onLayoutStart = function() {
+    console.log('onLayoutStart', this._item.isActive());
     var item = this._item;
     var grid = item.getGrid();
 
@@ -3234,6 +3230,12 @@
     var itemIndex = grid._items.indexOf(item);
     var nextLeft = grid._layout.slots[itemIndex * 2];
     var nextTop = grid._layout.slots[itemIndex * 2 + 1];
+
+    console.log({
+      itemIndex,
+      isHiding: item.isHiding(),
+      isVisible: item.isVisible()
+    });
 
     // If item's position did not change and the item did not migrate we can
     // safely skip layout.
@@ -3257,11 +3259,8 @@
       // Snap placeholder to correct position.
       var targetStyles = {};
       targetStyles[transformProp] = getTranslateString(nextLeft, nextTop);
-      if (this._animation.isAnimating()) {
-        this._animation.stop(targetStyles);
-      } else {
-        setStyles(this._element, targetStyles);
-      }
+      setStyles(this._element, targetStyles);
+      this._animation.stop(false);
 
       // Move placeholder inside correct container after migration.
       if (this._didMigrate) {
@@ -3288,6 +3287,8 @@
   ItemDragPlaceholder.prototype._setupAnimation = function() {
     if (!this.isActive()) return;
 
+    console.log('setupAnimation', this._item.isActive());
+
     var translate = getTranslate(this._element);
     this._currentLeft = translate.x;
     this._currentTop = translate.y;
@@ -3302,6 +3303,8 @@
   ItemDragPlaceholder.prototype._startAnimation = function() {
     if (!this.isActive()) return;
 
+    console.log('startAnimation', this._item.isActive());
+
     var animation = this._animation;
     var currentLeft = this._currentLeft;
     var currentTop = this._currentTop;
@@ -3314,7 +3317,10 @@
     // If placeholder is already in correct position let's just stop animation
     // and be done with it.
     if (currentLeft === nextLeft && currentTop === nextTop) {
-      if (animation.isAnimating()) animation.stop(targetStyles);
+      if (animation.isAnimating()) {
+        setStyles(this._element, targetStyles);
+        animation.stop(false);
+      }
       return;
     }
 
@@ -3322,6 +3328,7 @@
     var settings = this._item.getGrid()._settings.dragPlaceholder;
     var currentStyles = {};
     currentStyles[transformProp] = getTranslateString(currentLeft, currentTop);
+    console.log(currentStyles, targetStyles);
     animation.start(currentStyles, targetStyles, {
       duration: settings.duration,
       easing: settings.easing,
@@ -3387,14 +3394,33 @@
     grid.off(eventDragReleaseEnd, this._onReleaseEnd);
     grid.off(eventLayoutStart, this._onLayoutStart);
     grid.off(eventBeforeSend, this._onMigrate);
+    grid.off(eventHideStart, this._onHide);
 
     // Bind listeners to the next grid.
     nextGrid.on(eventDragReleaseEnd, this._onReleaseEnd);
     nextGrid.on(eventLayoutStart, this._onLayoutStart);
     nextGrid.on(eventBeforeSend, this._onMigrate);
+    nextGrid.on(eventHideStart, this._onHide);
 
     // Mark the item as migrated.
     this._didMigrate = true;
+  };
+
+  /**
+   * Reset placeholder if the associated item is hidden.
+   *
+   * @private
+   * @memberof ItemDragPlaceholder.prototype
+   * @param {Item[]} items
+   */
+  ItemDragPlaceholder.prototype._onHide = function(items) {
+    for (var i = 0; i < items.length; i++) {
+      if (items[i]._id === this._item._id) {
+        console.log('onHide');
+        this.reset();
+        return;
+      }
+    }
   };
 
   /**
@@ -3459,6 +3485,7 @@
     grid.on(eventLayoutStart, this._onLayoutStart);
     grid.on(eventDragReleaseEnd, this._onReleaseEnd);
     grid.on(eventBeforeSend, this._onMigrate);
+    grid.on(eventHideStart, this._onHide);
 
     // onCreate hook.
     if (isFunction(settings.dragPlaceholder.onCreate)) {
@@ -3498,6 +3525,7 @@
     grid.off(eventDragReleaseEnd, this._onReleaseEnd);
     grid.off(eventLayoutStart, this._onLayoutStart);
     grid.off(eventBeforeSend, this._onMigrate);
+    grid.off(eventHideStart, this._onHide);
 
     // Remove placeholder class from the placeholder element.
     if (this._className) {
@@ -3914,7 +3942,8 @@
     cancelLayoutTick(item._id);
 
     // Stop animation.
-    this._animation.stop(targetStyles);
+    if (targetStyles) setStyles(item._element, targetStyles);
+    this._animation.stop(!targetStyles);
 
     // Remove positioning class.
     removeClass(item._element, item.getGrid()._settings.itemPositioningClass);
@@ -4051,7 +4080,9 @@
       item._left === this._currentLeft - this._offsetLeft &&
       item._top === this._currentTop - this._offsetTop
     ) {
-      if (this._isInterrupted) this.stop(false, this._targetStyles);
+      if (this._isInterrupted) {
+        this.stop(false, this._targetStyles);
+      }
       this._isActive = false;
       this._finish();
       return;
@@ -4527,7 +4558,7 @@
     var queue = this._queue;
     var settings = grid._settings;
 
-    this._stopAnimation({});
+    this._stopAnimation(false);
 
     // Fire all uncompleted callbacks with interrupted flag and destroy the queue.
     queue.process(true, item);
@@ -4583,10 +4614,9 @@
 
     // If we need to apply the styles instantly without animation.
     if (isInstant) {
+      setStyles(childElement, targetStyles);
       if (animation.isAnimating()) {
-        animation.stop(targetStyles);
-      } else {
-        setStyles(childElement, targetStyles);
+        animation.stop(false);
       }
       onFinish && onFinish();
       return;
@@ -4613,13 +4643,13 @@
    *
    * @private
    * @memberof ItemVisibility.prototype
-   * @param {Object} [targetStyles]
+   * @param {Boolean} [applyCurrentStyles=true]
    */
-  ItemVisibility.prototype._stopAnimation = function(targetStyles) {
+  ItemVisibility.prototype._stopAnimation = function(applyCurrentStyles) {
     if (this._isDestroyed) return;
     var item = this._item;
     cancelVisibilityTick(item._id);
-    this._animation.stop(targetStyles);
+    this._animation.stop(applyCurrentStyles);
   };
 
   /**
@@ -4984,11 +5014,11 @@
     var index = grid._items.indexOf(this);
 
     // Destroy handlers.
+    this._dragPlaceholder.destroy();
     this._dragRelease.destroy();
     this._migrate.destroy();
     this._layout.destroy();
     this._visibility.destroy();
-    this._dragPlaceholder.destroy();
     if (this._drag) this._drag.destroy();
 
     // Remove the inline styles Muuri has been managing.
