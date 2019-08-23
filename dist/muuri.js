@@ -5017,7 +5017,7 @@
         }
 
         // Update grid height.
-        layout.height = itemSlot.top + itemSlot.height;
+        layout.height += itemSlot.top + itemSlot.height;
       }
 
       // In horizontal mode, if the item's right overlaps the grid's right edge.
